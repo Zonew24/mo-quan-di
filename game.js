@@ -185,7 +185,6 @@ async function aha(i) {
 
 // ---------- chế độ chiếu lớp (?host): cả lớp vote bằng điện thoại ----------
 const HOST = new URLSearchParams(location.search).has('host');
-const VOTE_SEC = 20;
 const Room = { code: '', online: 0, n: 0 };
 const roomPath = p => `rooms/${Room.code}/${p}`;
 function voteUrl() {
@@ -234,10 +233,10 @@ function voteRound(text, opts, max = 1, onLive) {
   const box = $('#dialog');
   box.innerHTML = `${head('you', text)}<div class="vote">
     ${opts.map((o, i) => `<button data-i="${i}" class="bar"><span class="fill"></span><span class="lbl">${o}</span><b>0</b></button>`).join('')}
-    <div class="vote-foot"><span id="vt">⏱ ${VOTE_SEC}s</span><span id="vn">0 phiếu</span><button class="next" id="vclose">Chốt ▸</button></div></div>`;
+    <div class="vote-foot"><span id="vt">Người mở game bấm Chốt khi đủ phiếu</span><span id="vn">0 phiếu</span><button class="next" id="vclose">Chốt ▸</button></div></div>`;
   box.querySelector('.dl-name').innerHTML = `📱 Cả lớp vote<span>Phòng ${Room.code}</span>`;
   box.hidden = false; box.classList.add('choice');
-  let counts = opts.map(() => 0), voters = 0, left = VOTE_SEC;
+  let counts = opts.map(() => 0), voters = 0;
   const top = () => counts.map((c, i) => [c, Math.random(), i]).filter(x => x[0] > 0).sort((a, b) => b[0] - a[0] || a[1] - b[1]).slice(0, max).map(x => x[2]);
   const draw = () => {
     const most = Math.max(1, ...counts);
@@ -250,26 +249,25 @@ function voteRound(text, opts, max = 1, onLive) {
     counts = opts.map(() => 0); voters = 0;
     for (const a of Object.values(v || {})) { voters++; Object.values(a || {}).forEach(i => { if (counts[i] !== undefined) counts[i]++; }); }
     draw(); if (onLive) onLive(top());
-    if (voters && voters >= Room.online) left = Math.min(left, 3);
+    $('#vt').textContent = voters && voters >= Room.online ? '✓ Cả lớp đã vote xong' : 'Người mở game bấm Chốt khi đủ phiếu';
   });
   return new Promise(res => {
     const finish = win => {
-      clearInterval(tick); off(); box.onclick = null;
+      off(); box.onclick = null;
       Net.set(roomPath('q'), { id, text, opts, max, open: false, win });
       box.querySelectorAll('.bar').forEach((b, i) => b.classList.toggle('win', win.includes(i)));
       sfx('good');
       setTimeout(() => { box.hidden = true; box.classList.remove('choice'); res(max > 1 ? win : win[0]); }, 1400);
     };
-    const tick = setInterval(() => {
-      if (document.hidden) return;
-      left = Math.max(0, left - 1);
-      $('#vt').textContent = left ? `⏱ ${left}s` : voters ? '⏱ Hết giờ' : '⏱ Chưa có phiếu: bấm chọn giúp lớp';
-      if (!left && voters) finish(top());
-    }, 1000);
     box.onclick = e => {
-      if (e.target.closest('#vclose')) { const w = top(); if (w.length || max > 1) finish(w); return; }
+      // chỉ người mở game kết thúc lượt vote
+      if (e.target.closest('#vclose')) {
+        const w = top();
+        if (w.length || max > 1) finish(w); else $('#vt').textContent = 'Chưa có phiếu: bấm 1 lựa chọn để chọn thay lớp';
+        return;
+      }
       const b = e.target.closest('.bar');
-      if (b && max === 1) finish([+b.dataset.i]); // người chiếu chọn thay cả lớp
+      if (b && max === 1 && !voters) finish([+b.dataset.i]); // chưa ai vote: người chiếu chọn thay
     };
   });
 }
