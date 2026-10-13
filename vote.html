@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vote · Mở Quán Đi!</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&family=Baloo+2:wght@800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0e1830; --card: #18213d; --line: #39405a; --text: #f4efe6; --muted: #a9a3b8; --pink: #ff6b8b; --cream: #fff4e0; --ok: #2fbf71; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 50% 0, #26305a, var(--bg) 60%); color: var(--text);
+    font: 400 17px/1.45 'Be Vietnam Pro', system-ui, sans-serif; display: flex; justify-content: center; }
+  main { width: 100%; max-width: 480px; padding: 20px 16px 40px; }
+  h1 { margin: 0; font: 800 2.2rem/1 'Baloo 2', sans-serif; color: var(--cream); text-align: center; transform: rotate(-2deg); }
+  .room { text-align: center; color: var(--muted); font-size: .9rem; margin: 6px 0 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; }
+  .q { margin: 0 0 14px; font-size: 1.15rem; font-weight: 700; }
+  .hint { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
+  .opts { display: grid; gap: 10px; }
+  .opts button { text-align: left; padding: 14px 16px; border-radius: 14px; border: 2px solid var(--line); background: rgb(255 255 255 / .05);
+    color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+  .opts button[aria-pressed=true] { border-color: var(--pink); background: rgb(255 107 139 / .2); }
+  .opts button.win { border-color: var(--ok); background: rgb(47 191 113 / .25); }
+  .opts button:disabled { cursor: default; }
+  .send { width: 100%; margin-top: 14px; padding: 14px; border: 0; border-radius: 999px; background: var(--pink); color: #fff; font: inherit; font-weight: 800; }
+  .send:disabled { opacity: .4; }
+  .status { text-align: center; margin-top: 14px; color: var(--muted); }
+  .status b { color: var(--ok); }
+  .wait { text-align: center; padding: 30px 10px; }
+  .wait .cup { font-size: 3rem; animation: bob 1.4s ease-in-out infinite; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--cream); color: #2b1d12;
+    font: inherit; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; }
+  form button { padding: 0 18px; border: 0; border-radius: 12px; background: var(--pink); color: #fff; font: inherit; font-weight: 800; }
+  :focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+  @keyframes bob { 50% { transform: translateY(-8px) rotate(-6deg); } }
+  @media (prefers-reduced-motion: reduce) { .wait .cup { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>MỞ QUÁN ĐI!</h1>
+  <p class="room" id="roomLine">Vote cùng cả lớp</p>
+
+  <section class="card" id="join" hidden>
+    <p class="q">Nhập mã phòng trên màn chiếu</p>
+    <form id="joinForm"><input id="code" maxlength="4" autocomplete="off" aria-label="Mã phòng" placeholder="ABCD"><button>Vào</button></form>
+  </section>
+
+  <section class="card" id="box" hidden aria-live="polite"></section>
+</main>
+
+<script src="firebase-config.js"></script>
+<script src="net.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const me = (() => { try { let id = localStorage.getItem('mqd-voter'); if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('mqd-voter', id); } return id; } catch (_) { return Math.random().toString(36).slice(2, 10); } })();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+let room = (new URLSearchParams(location.search).get('r') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+let q = null, picked = [], sent = false;
+
+function render() {
+  const box = $('#box'); box.hidden = false;
+  if (!q) { box.innerHTML = `<div class="wait"><div class="cup">🧋</div><p>Đã vào phòng! Chờ câu hỏi tiếp theo…</p><p class="hint">Nhìn lên màn chiếu nhé.</p></div>`; return; }
+  if (q.end) { box.innerHTML = `<div class="wait"><div class="cup">🎉</div><p>${esc(q.text)}</p></div>`; return; }
+  const multi = q.max > 1, closed = !q.open, win = q.win || [];
+  box.innerHTML = `<p class="q">${esc(q.text)}</p>
+    ${multi ? `<p class="hint">Chọn tối đa ${q.max} mục (${picked.length}/${q.max})</p>` : ''}
+    <div class="opts">${q.opts.map((o, i) => `<button data-i="${i}" aria-pressed="${picked.includes(i)}" class="${closed && win.includes(i) ? 'win' : ''}" ${closed ? 'disabled' : ''}>${esc(o)}</button>`).join('')}</div>
+    ${multi && !closed ? `<button class="send" ${picked.length ? '' : 'disabled'}>${sent ? 'Gửi lại' : 'Gửi phiếu'}</button>` : ''}
+    <p class="status">${closed ? (win.length ? 'Đã chốt! Ô xanh là lựa chọn của cả lớp.' : 'Đã chốt.') : sent ? '<b>✓ Đã vote</b> · đổi ý thì bấm lại' : 'Bấm để vote'}</p>`;
+}
+const send = () => { sent = true; Net.set(`rooms/${room}/votes/${q.id}/${me}`, picked); render(); };
+$('#box').onclick = e => {
+  if (!q || !q.open) return;
+  if (e.target.closest('.send')) return send();
+  const b = e.target.closest('button[data-i]'); if (!b) return;
+  const i = +b.dataset.i;
+  if (q.max > 1) {
+    if (picked.includes(i)) picked = picked.filter(x => x !== i); else if (picked.length < q.max) picked.push(i);
+    render();
+  } else { picked = [i]; send(); }
+};
+
+function enter() {
+  $('#join').hidden = true;
+  $('#roomLine').textContent = `Phòng ${room} · đang kết nối…`;
+  Net.online(`rooms/${room}/online/${me}`);
+  Net.on(`rooms/${room}/q`, v => {
+    if (!v || !v.id) { q = null; return render(); }
+    if (!q || q.id !== v.id) { picked = []; sent = false; }
+    q = v; render();
+  });
+  Net.ready.then(() => { $('#roomLine').textContent = `Phòng ${room}${Net.mode === 'local' ? ' · thử trên cùng máy' : ''}`; }, () => { $('#roomLine').textContent = 'Không kết nối được. Kiểm tra mạng rồi tải lại trang.'; });
+}
+$('#joinForm').onsubmit = e => {
+  e.preventDefault();
+  const c = $('#code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (c.length !== 4) return $('#code').focus();
+  room = c; history.replaceState(null, '', `?r=${room}`); enter();
+};
+if (room.length === 4) enter(); else { $('#join').hidden = false; $('#code').focus(); }
+</script>
+</body>
+</html>
